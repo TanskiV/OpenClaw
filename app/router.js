@@ -1,5 +1,6 @@
 const fs = require("fs");
 const path = require("path");
+const { appendEvent } = require("./appendEvent");
 
 const queueDir = path.join(__dirname, "..", "queue");
 const counterFile = path.join(queueDir, "counter.txt");
@@ -35,6 +36,12 @@ function routeIncomingMessage(msg) {
   };
 
   fs.appendFileSync(tasksFile, JSON.stringify(task) + "\n", "utf8");
+  appendEvent({
+    taskId: task.id,
+    event: "accepted",
+    by: "gateway",
+    meta: { source: task.source, chatId: task.chatId }
+  });
 
   return task;
 }

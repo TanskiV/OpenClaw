@@ -1,6 +1,7 @@
 // /opt/openclaw/gateway/app/consumer.js
 const fs = require("fs");
 const path = require("path");
+const { appendEvent } = require("./appendEvent");
 
 const queueDir = path.join(__dirname, "..", "queue");
 const tasksFile = path.join(queueDir, "tasks.jsonl");
@@ -54,6 +55,13 @@ function consumeOneFIFO() {
 
   writeStatus(status);
   console.log(`[CONSUME] picked task ${task.id}: ${task.text}`);
+
+  appendEvent({
+    taskId: task.id,
+    event: "picked",
+    by: "consumer",
+    meta: { chatId: task.chatId }
+  });
 
   // fire-and-forget notification
   notifyTelegram(`🟡 Взял задачу #${task.id}`).catch(() => {});

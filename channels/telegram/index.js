@@ -47,7 +47,7 @@ await fetch(`${API}/sendMessage`, {
   headers: { "Content-Type": "application/json" },
   body: JSON.stringify({
     chat_id: chatId,
-    text: `✅ Принято в очередь\nid: ${task.id}`
+    text: "Принял 👍"
   })
 });
 
@@ -64,4 +64,3 @@ await fetch(`${API}/sendMessage`, {
 })();
 
 console.log("Telegram long-polling started");
-
