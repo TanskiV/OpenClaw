@@ -27,18 +27,37 @@ if [ -x "/usr/local/bin/openclaw" ]; then
   exec /usr/local/bin/openclaw gateway --host 0.0.0.0 --port "$PORT"
 fi
 
-# 2) Try npm's global bin at runtime
-if command -v npm >/dev/null 2>&1; then
-  BIN="$(npm bin -g 2>/dev/null)/openclaw"
-  if [ -x "$BIN" ]; then
-    exec "$BIN" gateway --host 0.0.0.0 --port "$PORT"
+# 2) Try to discover bin from package.json and execute it (most robust)
+PKG_JSON="/usr/local/lib/node_modules/openclaw/package.json"
+if [ -f "$PKG_JSON" ]; then
+  BIN_FIELD=$(node -e "try{const p=require('$PKG_JSON'); const b=p.bin; if(!b) console.log(''); else if(typeof b==='string') console.log(b); else if(typeof b==='object'){const k=Object.keys(b)[0]; console.log(b[k]);}}catch(e){console.log('');}")
+  if [ -n "$BIN_FIELD" ]; then
+    # Normalize and resolve the path
+    BIN_FIELD="${BIN_FIELD#./}"
+    BIN_PATH="/usr/local/lib/node_modules/openclaw/${BIN_FIELD}"
+
+    if [ -x "$BIN_PATH" ]; then
+      exec "$BIN_PATH" gateway --host 0.0.0.0 --port "$PORT"
+    fi
+
+    # If it's a JS/MJS file, run with node
+    case "$BIN_PATH" in
+      *.mjs|*.js)
+        exec node "$BIN_PATH" gateway --host 0.0.0.0 --port "$PORT"
+        ;;
+    esac
   fi
 fi
 
-# 3) Try common module path
+# 3) Try common module entrypoint
 if [ -f "/usr/local/lib/node_modules/openclaw/openclaw.mjs" ]; then
   exec node /usr/local/lib/node_modules/openclaw/openclaw.mjs gateway --host 0.0.0.0 --port "$PORT"
 fi
 
-# 4) Fallback to calling `openclaw` (may rely on PATH)
+# 4) Fallback to npm exec --no-install
+if command -v npm >/dev/null 2>&1; then
+  exec npm exec --no-install -- openclaw gateway --host 0.0.0.0 --port "$PORT"
+fi
+
+# 5) Final fallback: rely on PATH
 exec sh -c "openclaw gateway --host 0.0.0.0 --port $PORT"
