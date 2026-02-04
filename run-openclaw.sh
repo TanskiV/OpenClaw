@@ -43,7 +43,7 @@ if [ -f "$PKG_JSON" ]; then
     # If it's a JS/MJS file, run with node
     case "$BIN_PATH" in
       *.mjs|*.js)
-        exec node --trace-warnings --enable-source-maps "$BIN_PATH" gateway --host 0.0.0.0 --port "$PORT" 2>&1 | sed -u 's/^/[openclaw] /'
+        exec sh -c "node --trace-warnings --enable-source-maps \"$BIN_PATH\" gateway --host 0.0.0.0 --port \"$PORT\" 2>&1 | sed -u 's/^/[openclaw] /'"
         ;;
     esac
   fi
@@ -56,7 +56,7 @@ if [ -f "$PKG_JSON" ]; then
     if [ -f "$MAIN_PATH" ]; then
       case "$MAIN_PATH" in
         *.mjs|*.js)
-          exec node --trace-warnings --enable-source-maps "$MAIN_PATH" gateway --host 0.0.0.0 --port "$PORT" 2>&1 | sed -u 's/^/[openclaw] /'
+          exec sh -c "node --trace-warnings --enable-source-maps \"$MAIN_PATH\" gateway --host 0.0.0.0 --port \"$PORT\" 2>&1 | sed -u 's/^/[openclaw] /'"
           ;;
         *)
           exec "$MAIN_PATH" gateway --host 0.0.0.0 --port "$PORT"
@@ -71,7 +71,7 @@ for p in "/usr/local/lib/node_modules/openclaw/openclaw.mjs" "/usr/local/lib/nod
   if [ -f "$p" ]; then
     case "$p" in
       *.mjs|*.js)
-        exec node --trace-warnings --enable-source-maps "$p" gateway --host 0.0.0.0 --port "$PORT" 2>&1 | sed -u 's/^/[openclaw] /'
+        exec sh -c "node --trace-warnings --enable-source-maps \"$p\" gateway --host 0.0.0.0 --port \"$PORT\" 2>&1 | sed -u 's/^/[openclaw] /'"
         ;;
       *)
         exec "$p" gateway --host 0.0.0.0 --port "$PORT"
@@ -80,10 +80,13 @@ for p in "/usr/local/lib/node_modules/openclaw/openclaw.mjs" "/usr/local/lib/nod
   fi
 done
 
-# 4) Fallback to npm exec --no-install
-if command -v npm >/dev/null 2>&1; then
-  exec npm exec --no-install -- openclaw gateway --host 0.0.0.0 --port "$PORT"
+# 4) (removed) fallback to npm exec --no-install — package has no bin so npm exec fails
+
+# 5) Final fallback: rely on PATH (if present)
+if command -v openclaw >/dev/null 2>&1; then
+  exec sh -c "openclaw gateway --host 0.0.0.0 --port $PORT"
 fi
 
-# 5) Final fallback: rely on PATH
-exec sh -c "openclaw gateway --host 0.0.0.0 --port $PORT"
+# If we reached here — nothing started successfully
+echo "ERROR: could not start openclaw via any method" >&2
+exit 1
