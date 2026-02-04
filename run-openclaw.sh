@@ -56,6 +56,11 @@ if [ -f "$PKG_JSON" ]; then
     if [ -f "$MAIN_PATH" ]; then
       case "$MAIN_PATH" in
         *.mjs|*.js)
+          echo "--- openclaw: showing --help output ---"
+          node --trace-warnings --enable-source-maps "$MAIN_PATH" --help 2>&1 | sed -u 's/^/[openclaw-help] /' || true
+          echo "--- openclaw: showing 'gateway --help' output ---"
+          node --trace-warnings --enable-source-maps "$MAIN_PATH" gateway --help 2>&1 | sed -u 's/^/[openclaw-gateway-help] /' || true
+
           exec sh -c "node --trace-warnings --enable-source-maps \"$MAIN_PATH\" gateway --host 0.0.0.0 --port \"$PORT\" 2>&1 | sed -u 's/^/[openclaw] /'"
           ;;
         *)
