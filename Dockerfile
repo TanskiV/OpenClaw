@@ -4,7 +4,8 @@ RUN npm install -g openclaw
 
 WORKDIR /app
 
-# если твоему сервису надо слушать порт:
-# EXPOSE 3000
+# На всякий случай, чтобы Render точно видел глобальные бинарники
+ENV PATH="/usr/local/bin:${PATH}"
 
-CMD openclaw
+# Самый надежный запуск: напрямую через node по реальному пути
+CMD ["node", "/usr/local/lib/node_modules/openclaw/openclaw.mjs"]
