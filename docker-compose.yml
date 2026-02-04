@@ -9,5 +9,7 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+    environment:
+      - TARGET_GITHUB_TOKEN
     volumes:
       - ./queue:/app/queue
