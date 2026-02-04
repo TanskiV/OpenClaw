@@ -43,7 +43,7 @@ if [ -f "$PKG_JSON" ]; then
     # If it's a JS/MJS file, run with node
     case "$BIN_PATH" in
       *.mjs|*.js)
-        exec node "$BIN_PATH" gateway --host 0.0.0.0 --port "$PORT"
+        exec node --trace-warnings --enable-source-maps "$BIN_PATH" gateway --host 0.0.0.0 --port "$PORT" 2>&1 | sed -u 's/^/[openclaw] /'
         ;;
     esac
   fi
@@ -56,7 +56,7 @@ if [ -f "$PKG_JSON" ]; then
     if [ -f "$MAIN_PATH" ]; then
       case "$MAIN_PATH" in
         *.mjs|*.js)
-          exec node "$MAIN_PATH" gateway --host 0.0.0.0 --port "$PORT"
+          exec node --trace-warnings --enable-source-maps "$MAIN_PATH" gateway --host 0.0.0.0 --port "$PORT" 2>&1 | sed -u 's/^/[openclaw] /'
           ;;
         *)
           exec "$MAIN_PATH" gateway --host 0.0.0.0 --port "$PORT"
@@ -72,7 +72,7 @@ for p in "${COMMONS[@]}"; do
   if [ -f "$p" ]; then
     case "$p" in
       *.mjs|*.js)
-        exec node "$p" gateway --host 0.0.0.0 --port "$PORT"
+        exec node --trace-warnings --enable-source-maps "$p" gateway --host 0.0.0.0 --port "$PORT" 2>&1 | sed -u 's/^/[openclaw] /'
         ;;
       *)
         exec "$p" gateway --host 0.0.0.0 --port "$PORT"
