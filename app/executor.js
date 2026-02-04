@@ -181,31 +181,29 @@ async function callOpenAI({ system, user }) {
     text: {
       format: {
         type: "json_schema",
-        json_schema: {
-          name: "code_changes",
-          schema: {
-            type: "object",
-            additionalProperties: false,
-            properties: {
-              summary: { type: "string" },
-              edits: {
-                type: "array",
-                items: {
-                  type: "object",
-                  additionalProperties: false,
-                  properties: {
-                    path: { type: "string" },
-                    action: { type: "string", enum: ["write", "delete"] },
-                    content: { type: "string" }
-                  },
-                  required: ["path", "action"]
-                }
+        name: "code_changes",
+        schema: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            summary: { type: "string" },
+            edits: {
+              type: "array",
+              items: {
+                type: "object",
+                additionalProperties: false,
+                properties: {
+                  path: { type: "string" },
+                  action: { type: "string", enum: ["write", "delete"] },
+                  content: { type: "string" }
+                },
+                required: ["path", "action"]
               }
-            },
-            required: ["summary", "edits"]
+            }
           },
-          strict: true
-        }
+          required: ["summary", "edits"]
+        },
+        strict: true
       }
     }
   };
