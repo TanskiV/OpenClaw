@@ -1,0 +1,5 @@
+.env
+queue/*.jsonl
+queue/status.json
+queue/counter.txt
+node_modules
