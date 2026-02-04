@@ -164,7 +164,30 @@ function extractOutputText(response) {
   return combined;
 }
 
-async function callOpenAI({ system, user }) {
+function buildTextFormat(name, schema) {
+  return {
+    format: {
+      type: "json_schema",
+      name,
+      schema,
+      strict: true
+    }
+  };
+}
+
+function buildChatInput(system, history, user) {
+  const input = [];
+  input.push({ role: "system", content: [{ type: "input_text", text: system }] });
+  for (const item of history || []) {
+    if (!item || !item.role || !item.content) continue;
+    const role = item.role === "assistant" ? "assistant" : "user";
+    input.push({ role, content: [{ type: "input_text", text: item.content }] });
+  }
+  input.push({ role: "user", content: [{ type: "input_text", text: user }] });
+  return input;
+}
+
+async function callOpenAI({ system, user, history, schemaName, schema }) {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
     throw new Error("OPENAI_API_KEY is missing");
@@ -174,38 +197,8 @@ async function callOpenAI({ system, user }) {
 
   const payload = {
     model,
-    input: [
-      { role: "system", content: [{ type: "input_text", text: system }] },
-      { role: "user", content: [{ type: "input_text", text: user }] },
-    ],
-    text: {
-      format: {
-        type: "json_schema",
-        name: "code_changes",
-        schema: {
-          type: "object",
-          additionalProperties: false,
-          properties: {
-            summary: { type: "string" },
-            edits: {
-              type: "array",
-              items: {
-                type: "object",
-                additionalProperties: false,
-                properties: {
-                  path: { type: "string" },
-                  action: { type: "string", enum: ["write", "delete"] },
-                  content: { type: "string" }
-                },
-                  required: ["path", "action", "content"]
-              }
-            }
-          },
-          required: ["summary", "edits"]
-        },
-        strict: true
-      }
-    }
+    input: buildChatInput(system, history, user),
+    text: buildTextFormat(schemaName, schema)
   };
 
   const reasoning = process.env.OPENAI_REASONING_EFFORT;
@@ -294,9 +287,30 @@ async function runDryRun(task) {
 
   const context = buildContext(workspaceDir, policy, task.text || "");
   const { system, user } = buildPrompt(context);
+  const schema = {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      summary: { type: "string" },
+      edits: {
+        type: "array",
+        items: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            path: { type: "string" },
+            action: { type: "string", enum: ["write", "delete"] },
+            content: { type: "string" }
+          },
+          required: ["path", "action", "content"]
+        }
+      }
+    },
+    required: ["summary", "edits"]
+  };
 
   const aiStart = Date.now();
-  const { data, model } = await callOpenAI({ system, user });
+  const { data, model } = await callOpenAI({ system, user, history: [], schemaName: "code_changes", schema });
   const aiMs = Date.now() - aiStart;
 
   const outputText = extractOutputText(data);
@@ -357,6 +371,128 @@ async function runDryRun(task) {
   };
 }
 
+async function runInteractiveChat(task, history) {
+  const policy = loadPolicy();
+  const { workspaceDir } = ensureWorkspace(task);
+  const context = buildContext(workspaceDir, policy, task.text || "");
+
+  const system = [
+    "You are a helpful engineer answering questions about this project.",
+    "Do not generate code patches.",
+    "If a code change is clearly requested, set switch_intent to code_change and ask for confirmation.",
+    "Respond with concise guidance.",
+  ].join("\n");
+
+  const user = [
+    "User message:",
+    context.task,
+    "",
+    "Repo tree (top level):",
+    context.repoTree.join("\n"),
+    "",
+    "Allowlist paths:",
+    context.allowlist.join(", ") || "(none)",
+    "",
+    "Denylist paths:",
+    context.denylist.join(", ") || "(none)",
+    "",
+    "File snippets:",
+    ...context.snippets.map((s) => `--- ${s.file}\n${s.content}`),
+  ].join("\n");
+
+  const schema = {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      reply: { type: "string" },
+      follow_up: { type: ["string", "null"] },
+      switch_intent: { type: ["string", "null"], enum: ["code_change", "interactive_chat", null] }
+    },
+    required: ["reply", "follow_up", "switch_intent"]
+  };
+
+  const aiStart = Date.now();
+  const { data, model } = await callOpenAI({
+    system,
+    user,
+    history,
+    schemaName: "interactive_chat",
+    schema
+  });
+  const aiMs = Date.now() - aiStart;
+  const outputText = extractOutputText(data);
+  const parsed = parseEdits(outputText);
+
+  return {
+    reply: parsed.reply || "",
+    followUp: parsed.follow_up || null,
+    switchIntent: parsed.switch_intent || null,
+    responseId: data.id,
+    model,
+    aiMs
+  };
+}
+
+async function runClassify(task, history) {
+  const policy = loadPolicy();
+  const { workspaceDir } = ensureWorkspace(task);
+  const context = buildContext(workspaceDir, policy, task.text || "");
+
+  const system = [
+    "You classify whether the message requires a code change.",
+    "Return intent as code_change or interactive_chat.",
+    "If you recommend code_change, set switch_intent to code_change and ask for confirmation in reply.",
+  ].join("\n");
+
+  const user = [
+    "User message:",
+    context.task,
+    "",
+    "Repo tree (top level):",
+    context.repoTree.join("\n"),
+    "",
+    "Allowlist paths:",
+    context.allowlist.join(", ") || "(none)",
+    "",
+    "Denylist paths:",
+    context.denylist.join(", ") || "(none)",
+  ].join("\n");
+
+  const schema = {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      intent: { type: "string", enum: ["interactive_chat", "code_change"] },
+      reply: { type: "string" },
+      follow_up: { type: ["string", "null"] },
+      switch_intent: { type: ["string", "null"], enum: ["code_change", "interactive_chat", null] }
+    },
+    required: ["intent", "reply", "follow_up", "switch_intent"]
+  };
+
+  const aiStart = Date.now();
+  const { data, model } = await callOpenAI({
+    system,
+    user,
+    history,
+    schemaName: "classify_or_chat",
+    schema
+  });
+  const aiMs = Date.now() - aiStart;
+  const outputText = extractOutputText(data);
+  const parsed = parseEdits(outputText);
+
+  return {
+    intent: parsed.intent || "interactive_chat",
+    reply: parsed.reply || "",
+    followUp: parsed.follow_up || null,
+    switchIntent: parsed.switch_intent || null,
+    responseId: data.id,
+    model,
+    aiMs
+  };
+}
+
 function createCommit(task) {
   const policy = loadPolicy();
   const { workspaceDir } = ensureWorkspace(task);
@@ -402,4 +538,12 @@ function cleanupWorkspace(task) {
   fs.rmSync(workspaceDir, { recursive: true, force: true });
 }
 
-module.exports = { runDryRun, createCommit, pushCommit, cleanupWorkspace, getWorkspacePath };
+module.exports = {
+  runDryRun,
+  runInteractiveChat,
+  runClassify,
+  createCommit,
+  pushCommit,
+  cleanupWorkspace,
+  getWorkspacePath
+};

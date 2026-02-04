@@ -3,7 +3,15 @@ console.log("Task Consumer started");
 const fs = require("fs");
 const path = require("path");
 const { appendEvent } = require("./appendEvent");
-const { runDryRun, createCommit, pushCommit, cleanupWorkspace } = require("./executor");
+const {
+  runDryRun,
+  runInteractiveChat,
+  runClassify,
+  createCommit,
+  pushCommit,
+  cleanupWorkspace
+} = require("./executor");
+const { touchSessionsFile, loadSession, appendHistory, setPendingSwitch } = require("./sessions");
 
 const queueDir = path.join(__dirname, "..", "queue");
 const tasksFile = path.join(queueDir, "tasks.jsonl");
@@ -26,6 +34,7 @@ function ensureQueueFiles() {
   touchFile(processedFile);
   touchFile(tasksFile);
   touchFile(statusFile);
+  touchSessionsFile();
 }
 
 function readTaskLines() {
@@ -160,6 +169,80 @@ async function consumeOneFIFO() {
     });
     console.log(`error task ${task.id}: unknown_intent`);
     return;
+  }
+
+  if (task.intent === "interactive_chat" || task.intent === "classify_or_chat") {
+    try {
+      const session = loadSession(task.chatId) || { history: [] };
+      const history = Array.isArray(session.history) ? session.history.slice(-12) : [];
+
+      appendEvent({
+        taskId: task.id,
+        event: "ai_requested",
+        by: "executor",
+        meta: { model: process.env.OPENAI_MODEL || "gpt-5.2-codex", intent: task.intent }
+      });
+
+      let result = null;
+      if (task.intent === "interactive_chat") {
+        result = await runInteractiveChat(task, history);
+      } else {
+        result = await runClassify(task, history);
+      }
+
+      appendEvent({
+        taskId: task.id,
+        event: "ai_response_received",
+        by: "executor",
+        meta: { model: result?.model || (process.env.OPENAI_MODEL || "gpt-5.2-codex"), responseId: result?.responseId || "" }
+      });
+
+      const replyText = result?.reply || "Ок.";
+      notifyTelegram(replyText, task.chatId).catch(() => {});
+      appendHistory(task.chatId, [
+        { role: "user", content: task.text || "" },
+        { role: "assistant", content: replyText }
+      ]);
+
+      if (result?.switchIntent === "code_change" || result?.intent === "code_change") {
+        setPendingSwitch(task.chatId, {
+          intent: "code_change",
+          taskText: task.text || "",
+          ts: new Date().toISOString()
+        });
+      }
+
+      appendEvent({ taskId: task.id, event: "done", by: "executor", meta: { interactive: true } });
+      archiveTask(task);
+      popHead(lines);
+
+      writeStatus({
+        state: "done",
+        ts: new Date().toISOString(),
+        task: { id: task.id, author: task.author, text: task.text, chatId: task.chatId },
+        result: "interactive_chat"
+      });
+      console.log(`done task ${task.id}`);
+      return;
+    } catch (err) {
+      const reason = err?.message || String(err);
+      appendEvent({ taskId: task.id, event: "error", by: "executor", meta: { reason } });
+      if (reason.startsWith("OpenAI API error:")) {
+        notifyTelegram(`❌ Codex error: ${reason}`, task.chatId).catch(() => {});
+      } else {
+        notifyTelegram(`❌ Error #${task.id}: ${reason}`, task.chatId).catch(() => {});
+      }
+      archiveTask(task);
+      popHead(lines);
+      writeStatus({
+        state: "error",
+        ts: new Date().toISOString(),
+        task: { id: task.id, author: task.author, text: task.text, chatId: task.chatId },
+        error: reason
+      });
+      console.log(`error task ${task.id}: ${reason}`);
+      return;
+    }
   }
 
   if (!hasEvent(events, "picked")) {
