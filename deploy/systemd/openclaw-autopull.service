@@ -1,0 +1,6 @@
+[Unit]
+Description=OpenClaw auto pull from GitHub
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/openclaw-autopull.sh
