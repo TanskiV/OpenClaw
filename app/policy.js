@@ -49,15 +49,24 @@ function normalizePath(p) {
   return p.replace(/\\/g, "/");
 }
 
+function matchRule(pathValue, rule) {
+  if (!rule) return false;
+  if (rule.includes("*")) {
+    const prefix = rule.split("*")[0];
+    return pathValue.startsWith(prefix);
+  }
+  return pathValue === rule || pathValue.startsWith(rule);
+}
+
 function isDenied(filePath, denylist) {
   const normalized = normalizePath(filePath);
-  return denylist.some((rule) => normalized === rule || normalized.startsWith(rule));
+  return denylist.some((rule) => matchRule(normalized, rule));
 }
 
 function isAllowed(filePath, allowlist) {
   if (!allowlist || allowlist.length === 0) return true;
   const normalized = normalizePath(filePath);
-  return allowlist.some((rule) => normalized === rule || normalized.startsWith(rule));
+  return allowlist.some((rule) => matchRule(normalized, rule));
 }
 
 function validatePaths(files, policy) {

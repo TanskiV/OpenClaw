@@ -8,9 +8,15 @@
     "backend/"
   ],
   "denylist": [
-    ".env",
-    ".github/workflows/",
+    ".env*",
+    ".github/",
     "deploy/",
+    "ci/",
+    ".circleci/",
+    ".gitlab/",
+    ".gitlab-ci.yml",
+    ".secrets/",
+    "secrets/",
     "docker-compose.yml",
     "package.json",
     "package-lock.json",
