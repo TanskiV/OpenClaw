@@ -1,5 +1,21 @@
 #!/bin/sh
 set -e
+set -x
+
+# Diagnostics to help identify why the container exits with status 1
+echo "--- Diagnostics start ---"
+node -v || true
+npm -v || true
+echo "PATH=$PATH"
+echo "ls -la /usr/local/bin || true"
+ls -la /usr/local/bin || true
+echo "ls -la /usr/local/lib/node_modules || true"
+ls -la /usr/local/lib/node_modules || true
+echo "npm -g list openclaw --depth 0 || true"
+npm -g list openclaw --depth 0 || true
+echo "which openclaw || true"
+command -v openclaw || true
+echo "--- Diagnostics end ---"
 
 # Ensure global bin is in PATH
 PATH="/usr/local/bin:$PATH"
