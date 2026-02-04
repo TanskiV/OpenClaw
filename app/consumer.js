@@ -1,4 +1,5 @@
 // /opt/openclaw/gateway/app/consumer.js
+console.log("Task Consumer started");
 const fs = require("fs");
 const path = require("path");
 const { appendEvent } = require("./appendEvent");
