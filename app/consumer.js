@@ -136,4 +136,20 @@ function consumeOneFIFO() {
   }
 }
 
-consumeOneFIFO();
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function consumeLoop() {
+  while (true) {
+    try {
+      consumeOneFIFO();
+    } catch (err) {
+      const reason = err?.message || String(err);
+      console.log(`error task unknown: ${reason}`);
+    }
+    await sleep(1500);
+  }
+}
+
+consumeLoop();
