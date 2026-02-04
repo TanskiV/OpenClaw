@@ -17,6 +17,18 @@ echo "which openclaw || true"
 command -v openclaw || true
 echo "--- Diagnostics end ---"
 
+echo "--- openclaw package contents ---"
+ls -la /usr/local/lib/node_modules/openclaw || true
+
+echo "--- openclaw package.json ---"
+cat /usr/local/lib/node_modules/openclaw/package.json || true
+
+echo "--- search for 'gateway' in package ---"
+grep -n "gateway" /usr/local/lib/node_modules/openclaw -R || true
+
+echo "--- require('/usr/local/lib/node_modules/openclaw') === ' + typeof(require('/usr/local/lib/node_modules/openclaw')) ---"
+node -e "try{const m=require('/usr/local/lib/node_modules/openclaw'); console.log('export type:', typeof m); console.dir(Object.keys(m).slice(0,50));}catch(e){console.error('require error:', e && e.message);}" || true
+
 # Ensure global bin is in PATH
 PATH="/usr/local/bin:$PATH"
 
