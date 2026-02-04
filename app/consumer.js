@@ -58,6 +58,13 @@ function hasEvent(events, name) {
   return events.some((e) => e.event === name);
 }
 
+function getEvent(events, name) {
+  for (let i = events.length - 1; i >= 0; i -= 1) {
+    if (events[i].event === name) return events[i];
+  }
+  return null;
+}
+
 function writeStatus(s) {
   fs.mkdirSync(queueDir, { recursive: true });
   fs.writeFileSync(statusFile, JSON.stringify(s, null, 2), "utf8");
@@ -113,7 +120,7 @@ function isExecutorDisabled() {
   return fs.existsSync(executorDisabledFlag) || process.env.EXECUTOR_DISABLED === "1";
 }
 
-function consumeOneFIFO() {
+async function consumeOneFIFO() {
   ensureQueueFiles();
 
   if (isPaused()) {
@@ -165,14 +172,30 @@ function consumeOneFIFO() {
       taskId: task.id,
       event: "plan_generated",
       by: "executor",
-      meta: { summary: "Dry-run stub (no AI executor yet)" }
+      meta: { summary: "AI plan generated" }
     });
   }
 
   let dryRunResult = null;
 
   if (!hasEvent(events, "workspace_ready") || !hasEvent(events, "diff_generated") || !hasEvent(events, "dry_run_ready")) {
-    dryRunResult = runDryRun(task);
+    appendEvent({
+      taskId: task.id,
+      event: "ai_requested",
+      by: "executor",
+      meta: { model: process.env.OPENAI_MODEL || "gpt-5.2-codex" }
+    });
+    dryRunResult = await runDryRun(task);
+    appendEvent({
+      taskId: task.id,
+      event: "ai_response_received",
+      by: "executor",
+      meta: {
+        model: dryRunResult?.model || (process.env.OPENAI_MODEL || "gpt-5.2-codex"),
+        responseId: dryRunResult?.responseId || "",
+        ms: dryRunResult?.aiMs || 0
+      }
+    });
   }
 
   if (!hasEvent(events, "workspace_ready")) {
@@ -198,6 +221,41 @@ function consumeOneFIFO() {
   }
 
   if (!hasEvent(events, "dry_run_ready")) {
+    if (dryRunResult?.policyViolations && dryRunResult.policyViolations.length > 0) {
+      appendEvent({
+        taskId: task.id,
+        event: "policy_violation",
+        by: "executor",
+        meta: { files: dryRunResult.policyViolations }
+      });
+      appendEvent({
+        taskId: task.id,
+        event: "error",
+        by: "executor",
+        meta: { reason: "blocked by policy" }
+      });
+      notifyTelegram(`❌ Blocked by policy #${task.id}`, task.chatId).catch(() => {});
+
+      archiveTask(task);
+      popHead(lines);
+
+      writeStatus({
+        state: "error",
+        ts: new Date().toISOString(),
+        task: { id: task.id, author: task.author, text: task.text, chatId: task.chatId },
+        error: "blocked by policy"
+      });
+      console.log(`error task ${task.id}: blocked by policy`);
+      return;
+    }
+
+    appendEvent({
+      taskId: task.id,
+      event: "ai_applied",
+      by: "executor",
+      meta: { files: dryRunResult?.files || [] }
+    });
+
     appendEvent({
       taskId: task.id,
       event: "dry_run_ready",
@@ -206,7 +264,8 @@ function consumeOneFIFO() {
         summary: dryRunResult?.summary || "Dry-run ready",
         files: dryRunResult?.files || [],
         additions: dryRunResult?.additions || 0,
-        deletions: dryRunResult?.deletions || 0
+        deletions: dryRunResult?.deletions || 0,
+        noChanges: dryRunResult?.noChanges || false
       }
     });
 
@@ -223,7 +282,8 @@ function consumeOneFIFO() {
         summary: summaryText,
         files: dryRunResult?.files || [],
         additions: dryRunResult?.additions || 0,
-        deletions: dryRunResult?.deletions || 0
+        deletions: dryRunResult?.deletions || 0,
+        noChanges: dryRunResult?.noChanges || false
       }
     });
 
@@ -236,10 +296,8 @@ function consumeOneFIFO() {
 
   try {
     if (hasEvent(events, "dry_run_ready")) {
-      if (!dryRunResult) {
-        dryRunResult = runDryRun(task);
-      }
-      if (dryRunResult?.noChanges) {
+      const dryRunEvent = getEvent(events, "dry_run_ready");
+      if (dryRunEvent?.meta?.noChanges) {
         appendEvent({ taskId: task.id, event: "noop", by: "executor", meta: {} });
         notifyTelegram(`✅ Done #${task.id} (no changes)`, task.chatId).catch(() => {});
         appendEvent({ taskId: task.id, event: "done", by: "executor", meta: {} });
@@ -329,7 +387,7 @@ function sleep(ms) {
 async function consumeLoop() {
   while (true) {
     try {
-      consumeOneFIFO();
+      await consumeOneFIFO();
     } catch (err) {
       const reason = err?.message || String(err);
       console.log(`error task unknown: ${reason}`);

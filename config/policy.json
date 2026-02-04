@@ -5,8 +5,7 @@
   },
   "allowlist": [
     "frontend/",
-    "backend/",
-    "config/schemas/"
+    "backend/"
   ],
   "denylist": [
     ".env",

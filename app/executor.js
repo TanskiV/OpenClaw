@@ -65,27 +65,290 @@ function getDiffInfo(workspaceDir) {
   return { files, additions, deletions };
 }
 
-function runDryRun(task) {
+function isSafePath(filePath) {
+  const normalized = filePath.replace(/\\/g, "/");
+  if (normalized.startsWith("/")) return false;
+  if (normalized.includes("..")) return false;
+  return true;
+}
+
+function buildRepoTree(workspaceDir, limit = 60) {
+  const entries = run("git ls-tree --name-only HEAD", { cwd: workspaceDir })
+    .split("\n")
+    .filter((l) => l.trim().length > 0);
+  return entries.slice(0, limit);
+}
+
+function readFileSnippet(workspaceDir, relativePath, maxBytes) {
+  const fullPath = path.join(workspaceDir, relativePath);
+  if (!fs.existsSync(fullPath)) return null;
+  const buf = fs.readFileSync(fullPath);
+  return buf.slice(0, maxBytes).toString("utf8");
+}
+
+function buildContext(workspaceDir, policy, taskText) {
+  const tree = buildRepoTree(workspaceDir);
+
+  const filesToRead = [
+    "README.md",
+    "frontend/README.md",
+    "backend/README.md",
+  ];
+
+  const snippets = [];
+  const maxBytesPerFile = 8000;
+  for (const file of filesToRead) {
+    const content = readFileSnippet(workspaceDir, file, maxBytesPerFile);
+    if (content) {
+      snippets.push({ file, content });
+    }
+  }
+
+  const context = {
+    repoTree: tree,
+    allowlist: policy.allowlist || [],
+    denylist: policy.denylist || [],
+    task: taskText || "",
+    snippets,
+  };
+
+  return context;
+}
+
+function buildPrompt(context) {
+  const system = [
+    "You are a senior software engineer working in a constrained repo.",
+    "Follow all policy rules strictly.",
+    "Only modify files within allowlist.",
+    "Never modify files in denylist.",
+    "Make minimal, relevant changes only.",
+    "Output JSON only, matching the provided schema.",
+  ].join("\n");
+
+  const user = [
+    "Task:",
+    context.task,
+    "\nRepo tree (top level):",
+    context.repoTree.join("\n"),
+    "\nAllowlist paths:",
+    context.allowlist.join(", ") || "(none)",
+    "\nDenylist paths:",
+    context.denylist.join(", ") || "(none)",
+    "\nFile snippets:",
+    ...context.snippets.map((s) => `--- ${s.file}\n${s.content}`),
+    "\nReturn edits as JSON. If no changes are needed, return an empty edits array and a brief summary.",
+  ].join("\n");
+
+  return { system, user };
+}
+
+function extractOutputText(response) {
+  if (response.output_text) return response.output_text;
+  if (!response.output || !Array.isArray(response.output)) return "";
+  let combined = "";
+  for (const item of response.output) {
+    const content = item.content || [];
+    for (const part of content) {
+      if (part.type === "output_text" || part.type === "text") {
+        combined += part.text || "";
+      }
+    }
+  }
+  return combined;
+}
+
+async function callOpenAI({ system, user }) {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) {
+    throw new Error("OPENAI_API_KEY is missing");
+  }
+
+  const model = process.env.OPENAI_MODEL || "gpt-5.2-codex";
+
+  const payload = {
+    model,
+    input: [
+      { role: "system", content: [{ type: "input_text", text: system }] },
+      { role: "user", content: [{ type: "input_text", text: user }] },
+    ],
+    text: {
+      format: {
+        type: "json_schema",
+        json_schema: {
+          name: "code_changes",
+          schema: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              summary: { type: "string" },
+              edits: {
+                type: "array",
+                items: {
+                  type: "object",
+                  additionalProperties: false,
+                  properties: {
+                    path: { type: "string" },
+                    action: { type: "string", enum: ["write", "delete"] },
+                    content: { type: "string" }
+                  },
+                  required: ["path", "action"]
+                }
+              }
+            },
+            required: ["summary", "edits"]
+          },
+          strict: true
+        }
+      }
+    }
+  };
+
+  const reasoning = process.env.OPENAI_REASONING_EFFORT;
+  if (reasoning) {
+    payload.reasoning = { effort: reasoning };
+  }
+
+  const verbosity = process.env.OPENAI_VERBOSITY;
+  if (verbosity) {
+    payload.text.verbosity = verbosity;
+  }
+
+  const maxTokens = process.env.OPENAI_MAX_OUTPUT_TOKENS;
+  if (maxTokens) {
+    payload.max_output_tokens = Number(maxTokens);
+  }
+
+  const res = await fetch("https://api.openai.com/v1/responses", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!res.ok) {
+    const errText = await res.text();
+    throw new Error(`OpenAI API error: ${res.status} ${errText}`);
+  }
+
+  const data = await res.json();
+  return { data, model };
+}
+
+function parseEdits(outputText) {
+  if (!outputText) {
+    throw new Error("empty model output");
+  }
+
+  let parsed = null;
+  try {
+    parsed = JSON.parse(outputText);
+  } catch (err) {
+    const start = outputText.indexOf("{");
+    const end = outputText.lastIndexOf("}");
+    if (start !== -1 && end !== -1) {
+      parsed = JSON.parse(outputText.slice(start, end + 1));
+    } else {
+      throw err;
+    }
+  }
+
+  return parsed;
+}
+
+function applyEdits(workspaceDir, edits) {
+  for (const edit of edits) {
+    if (!edit || typeof edit.path !== "string" || !isSafePath(edit.path)) {
+      throw new Error("invalid edit path");
+    }
+    const normalized = edit.path.replace(/\\/g, "/");
+    const fullPath = path.join(workspaceDir, normalized);
+
+    if (edit.action === "delete") {
+      if (fs.existsSync(fullPath)) {
+        fs.unlinkSync(fullPath);
+      }
+      continue;
+    }
+
+    if (edit.action === "write") {
+      const dir = path.dirname(fullPath);
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(fullPath, edit.content || "", "utf8");
+      continue;
+    }
+
+    throw new Error(`unknown edit action: ${edit.action}`);
+  }
+}
+
+async function runDryRun(task) {
   const policy = loadPolicy();
   const { workspaceDir } = ensureWorkspace(task);
 
-  const diffInfo = getDiffInfo(workspaceDir);
-  const noChanges = diffInfo.files.length === 0;
-  if (diffInfo.files.length > 0) {
-    validatePaths(diffInfo.files, policy);
+  const context = buildContext(workspaceDir, policy, task.text || "");
+  const { system, user } = buildPrompt(context);
+
+  const aiStart = Date.now();
+  const { data, model } = await callOpenAI({ system, user });
+  const aiMs = Date.now() - aiStart;
+
+  const outputText = extractOutputText(data);
+  const parsed = parseEdits(outputText);
+  const edits = Array.isArray(parsed.edits) ? parsed.edits : [];
+
+  const filesTouched = edits
+    .map((e) => e.path)
+    .filter((p) => typeof p === "string")
+    .map((p) => p.replace(/\\/g, "/"));
+
+  const policyViolations = [];
+  for (const file of filesTouched) {
+    if (!isSafePath(file)) {
+      policyViolations.push(file);
+    }
   }
 
-  const summary = noChanges
-    ? "No changes generated (dry-run stub)"
-    : `Changes: ${diffInfo.files.length} files`;
+  if (policyViolations.length === 0) {
+    try {
+      validatePaths(filesTouched, policy);
+    } catch (err) {
+      policyViolations.push(...filesTouched);
+    }
+  }
+
+  if (policyViolations.length > 0) {
+    return {
+      summary: parsed.summary || "Blocked by policy",
+      files: filesTouched,
+      additions: 0,
+      deletions: 0,
+      noChanges: true,
+      policyViolations,
+      responseId: data.id,
+      model,
+      aiMs
+    };
+  }
+
+  applyEdits(workspaceDir, edits);
+
+  const diffInfo = getDiffInfo(workspaceDir);
+  const noChanges = diffInfo.files.length === 0;
+
+  const summary = parsed.summary || (noChanges ? "No changes generated" : `Changes: ${diffInfo.files.length} files`);
 
   return {
-    workspaceDir,
     summary,
     files: diffInfo.files,
     additions: diffInfo.additions,
     deletions: diffInfo.deletions,
-    noChanges
+    noChanges,
+    policyViolations: [],
+    responseId: data.id,
+    model,
+    aiMs
   };
 }
 
