@@ -1,18 +1,11 @@
-FROM node:20-slim
+FROM node:22-slim
 
-RUN npm install -g openclaw
+RUN npm install -g openclaw@latest
 
 WORKDIR /app
 
-# Обязательно: Render прокидывает PORT, используем 10000 по умолчанию
+# Render прокидывает PORT; используем его или дефолт 18789
 EXPOSE 10000
 
-# На всякий случай гарантируем, что глобальные бинарари в PATH
-ENV PATH="/usr/local/bin:${PATH}"
-
-# Копируем скрипт-обёртку и делаем его исполняемым
-COPY ./run-openclaw.sh /usr/local/bin/run-openclaw.sh
-RUN chmod +x /usr/local/bin/run-openclaw.sh
-
-# Надёжный запуск через скрипт-обёртку
-CMD ["/usr/local/bin/run-openclaw.sh"]
+# Надёжный и минимальный запуск
+CMD ["sh", "-c", "openclaw gateway --bind lan --port ${PORT:-18789} --verbose"]
