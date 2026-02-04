@@ -147,6 +147,21 @@ async function consumeOneFIFO() {
     return;
   }
 
+  if (task.intent === "unknown") {
+    notifyTelegram("⚠️ Unknown task intent. Уточните формулировку.", task.chatId).catch(() => {});
+    appendEvent({ taskId: task.id, event: "error", by: "executor", meta: { reason: "unknown_intent" } });
+    archiveTask(task);
+    popHead(lines);
+    writeStatus({
+      state: "error",
+      ts: new Date().toISOString(),
+      task: { id: task.id, author: task.author, text: task.text, chatId: task.chatId },
+      error: "unknown_intent",
+    });
+    console.log(`error task ${task.id}: unknown_intent`);
+    return;
+  }
+
   if (!hasEvent(events, "picked")) {
     appendEvent({
       taskId: task.id,
@@ -373,7 +388,9 @@ async function consumeOneFIFO() {
         by: "executor",
         meta: { reason }
       });
-      if (reason.startsWith("push_failed: ")) {
+      if (reason.startsWith("OpenAI API error:")) {
+        notifyTelegram(`❌ Codex error: ${reason}`, task.chatId).catch(() => {});
+      } else if (reason.startsWith("push_failed: ")) {
         notifyTelegram(`❌ Ошибка при пуше: ${reason.replace("push_failed: ", "")}`, task.chatId).catch(() => {});
       } else {
         notifyTelegram(`❌ Error #${task.id}: ${reason}`, task.chatId).catch(() => {});
