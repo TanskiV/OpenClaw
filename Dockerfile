@@ -10,4 +10,4 @@ WORKDIR /app
 EXPOSE 10000
 
 # Стартовый скрипт
-CMD ["sh", "-c", "openclaw gateway --host 0.0.0.0 --port ${PORT:-10000}"]
+CMD ["sh", "-lc", "$(npm bin -g)/openclaw gateway --host 0.0.0.0 --port ${PORT:-10000}"]
