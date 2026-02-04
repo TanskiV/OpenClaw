@@ -17,7 +17,8 @@ const tasksFile = path.join(queueDir, "tasks.jsonl");
 const processedFile = path.join(queueDir, "processed.jsonl");
 const pauseFlag = path.join(queueDir, "PAUSE");
 const executorDisabledFlag = path.join(queueDir, "EXECUTOR_DISABLED");
-const APPROVER_CHAT_ID = 351234246;
+const APPROVER_CHAT_IDS = new Set([351234246, 306786415]);
+const eventsFile = path.join(queueDir, "task_events.jsonl");
 
 let offset = 0;
 
@@ -34,6 +35,49 @@ async function sendMessage(chatId, text) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ chat_id: chatId, text }),
   });
+}
+
+function readEvents() {
+  if (!fs.existsSync(eventsFile)) return [];
+  const raw = fs.readFileSync(eventsFile, "utf8");
+  if (!raw.trim()) return [];
+  const events = [];
+  for (const line of raw.split("\n")) {
+    if (!line.trim()) continue;
+    try {
+      events.push(JSON.parse(line));
+    } catch (err) {
+      continue;
+    }
+  }
+  return events;
+}
+
+function resolveLatestRunnableTaskId() {
+  const events = readEvents();
+  const state = new Map();
+
+  for (const ev of events) {
+    const id = String(ev.taskId);
+    if (!state.has(id)) state.set(id, []);
+    state.get(id).push(ev);
+  }
+
+  const runnable = [];
+  for (const [taskId, evs] of state.entries()) {
+    const hasDryRun = evs.some((e) => e.event === "dry_run_ready");
+    const hasApproved = evs.some((e) => e.event === "approved");
+    const hasDone = evs.some((e) => e.event === "done");
+    const hasError = evs.some((e) => e.event === "error");
+    if (hasDryRun && !hasApproved && !hasDone && !hasError) {
+      const lastDry = evs.filter((e) => e.event === "dry_run_ready").pop();
+      const ts = lastDry?.ts || "";
+      runnable.push({ taskId, ts });
+    }
+  }
+
+  runnable.sort((a, b) => (a.ts < b.ts ? 1 : -1));
+  return runnable.length > 0 ? runnable[0].taskId : null;
 }
 
 function readProcessedTask(taskId) {
@@ -63,7 +107,7 @@ async function handleCommand(text, chatId) {
 
   const approveMatch = trimmed.match(/^\/approve\s+(\S+)/i) || trimmed.match(/^approve\s+#?(\S+)/i);
   if (approveMatch) {
-    if (chatId !== APPROVER_CHAT_ID) {
+    if (!APPROVER_CHAT_IDS.has(chatId)) {
       await sendMessage(chatId, "Not authorized");
       return true;
     }
@@ -75,7 +119,7 @@ async function handleCommand(text, chatId) {
 
   const replayMatch = trimmed.match(/^\/replay\s+(\S+)/i) || trimmed.match(/^replay\s+#?(\S+)/i);
   if (replayMatch) {
-    if (chatId !== APPROVER_CHAT_ID) {
+    if (!APPROVER_CHAT_IDS.has(chatId)) {
       await sendMessage(chatId, "Not authorized");
       return true;
     }
@@ -94,7 +138,7 @@ async function handleCommand(text, chatId) {
   }
 
   if (trimmed === "/pause") {
-    if (chatId !== APPROVER_CHAT_ID) {
+    if (!APPROVER_CHAT_IDS.has(chatId)) {
       await sendMessage(chatId, "Not authorized");
       return true;
     }
@@ -104,7 +148,7 @@ async function handleCommand(text, chatId) {
   }
 
   if (trimmed === "/resume") {
-    if (chatId !== APPROVER_CHAT_ID) {
+    if (!APPROVER_CHAT_IDS.has(chatId)) {
       await sendMessage(chatId, "Not authorized");
       return true;
     }
@@ -114,7 +158,7 @@ async function handleCommand(text, chatId) {
   }
 
   if (trimmed === "/disable_executor") {
-    if (chatId !== APPROVER_CHAT_ID) {
+    if (!APPROVER_CHAT_IDS.has(chatId)) {
       await sendMessage(chatId, "Not authorized");
       return true;
     }
@@ -124,12 +168,27 @@ async function handleCommand(text, chatId) {
   }
 
   if (trimmed === "/enable_executor") {
-    if (chatId !== APPROVER_CHAT_ID) {
+    if (!APPROVER_CHAT_IDS.has(chatId)) {
       await sendMessage(chatId, "Not authorized");
       return true;
     }
     if (fs.existsSync(executorDisabledFlag)) fs.unlinkSync(executorDisabledFlag);
     await sendMessage(chatId, "Executor enabled");
+    return true;
+  }
+
+  if (trimmed === "#run") {
+    if (!APPROVER_CHAT_IDS.has(chatId)) {
+      await sendMessage(chatId, "Not authorized");
+      return true;
+    }
+    const taskId = resolveLatestRunnableTaskId();
+    if (!taskId) {
+      await sendMessage(chatId, "No runnable dry-run task found");
+      return true;
+    }
+    appendEvent({ taskId, event: "approved", by: "operator", meta: { chatId } });
+    await sendMessage(chatId, `Run approved #${taskId}`);
     return true;
   }
 

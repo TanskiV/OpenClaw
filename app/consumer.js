@@ -318,8 +318,9 @@ async function consumeOneFIFO() {
       }
     }
 
+    let commitInfo = null;
     if (!hasEvent(events, "commit_created")) {
-      const commitInfo = createCommit(task);
+      commitInfo = createCommit(task);
       appendEvent({
         taskId: task.id,
         event: "commit_created",
@@ -330,14 +331,22 @@ async function consumeOneFIFO() {
     }
 
     if (!hasEvent(events, "pushed")) {
-      const pushInfo = pushCommit(task);
-      appendEvent({
-        taskId: task.id,
-        event: "pushed",
-        by: "executor",
-        meta: { commit: pushInfo.commitHash }
-      });
-      notifyTelegram(`🚀 Pushed #${task.id}`, task.chatId).catch(() => {});
+      try {
+        const pushInfo = pushCommit(task);
+        appendEvent({
+          taskId: task.id,
+          event: "pushed",
+          by: "executor",
+          meta: { commit: pushInfo.commitHash }
+        });
+        const dryRunEvent = getEvent(events, "dry_run_ready");
+        const files = dryRunEvent?.meta?.files || commitInfo?.files || [];
+        const filesText = files.length > 0 ? files.map((f) => ` - ${f}`).join("\n") : " - (no files)";
+        notifyTelegram(`✅ Изменения запушены в main. Изменённые файлы:\n${filesText}`, task.chatId).catch(() => {});
+      } catch (err) {
+        const reason = err?.message || String(err);
+        throw new Error(`push_failed: ${reason}`);
+      }
     }
 
     appendEvent({ taskId: task.id, event: "done", by: "executor", meta: {} });
@@ -364,7 +373,11 @@ async function consumeOneFIFO() {
         by: "executor",
         meta: { reason }
       });
-      notifyTelegram(`❌ Error #${task.id}: ${reason}`, task.chatId).catch(() => {});
+      if (reason.startsWith("push_failed: ")) {
+        notifyTelegram(`❌ Ошибка при пуше: ${reason.replace("push_failed: ", "")}`, task.chatId).catch(() => {});
+      } else {
+        notifyTelegram(`❌ Error #${task.id}: ${reason}`, task.chatId).catch(() => {});
+      }
     }
 
     archiveTask(task);
