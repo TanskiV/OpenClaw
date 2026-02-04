@@ -19,6 +19,7 @@ function ensureWorkspace(task) {
   const policy = loadPolicy();
   const repoUrl = policy.repo?.url || "https://github.com/TanskiV/tanski-job-agent.git";
   const repoBranch = policy.repo?.branch || "main";
+  const token = process.env.TARGET_GITHUB_TOKEN;
 
   const workspaceRoot = getWorkspaceRoot();
   const workspaceDir = getWorkspacePath(task.id);
@@ -28,7 +29,13 @@ function ensureWorkspace(task) {
     return { workspaceDir, repoUrl, repoBranch };
   }
 
-  run(`git clone --depth 1 --branch ${repoBranch} ${repoUrl} ${workspaceDir}`);
+  const cloneUrl = token
+    ? repoUrl.replace("https://", `https://x-access-token:${token}@`)
+    : repoUrl;
+  run(`git clone --depth 1 --branch ${repoBranch} ${cloneUrl} ${workspaceDir}`);
+  if (token) {
+    run(`git remote set-url origin ${repoUrl}`, { cwd: workspaceDir });
+  }
   return { workspaceDir, repoUrl, repoBranch };
 }
 
@@ -377,14 +384,15 @@ function pushCommit(task) {
   const policy = loadPolicy();
   const { workspaceDir, repoBranch, repoUrl } = ensureWorkspace(task);
 
-  const token = process.env.GITHUB_TOKEN;
+  const token = process.env.TARGET_GITHUB_TOKEN;
   if (!token) {
-    throw new Error("GITHUB_TOKEN is missing");
+    throw new Error("TARGET_GITHUB_TOKEN is missing");
   }
 
   const authUrl = repoUrl.replace("https://", `https://x-access-token:${token}@`);
   run(`git remote set-url origin ${authUrl}`, { cwd: workspaceDir });
   run(`git push origin HEAD:${repoBranch}`, { cwd: workspaceDir });
+  run(`git remote set-url origin ${repoUrl}`, { cwd: workspaceDir });
 
   const commitHash = run("git rev-parse HEAD", { cwd: workspaceDir }).trim();
   return { commitHash };
