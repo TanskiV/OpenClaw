@@ -56,6 +56,9 @@ if [ -f "$PKG_JSON" ]; then
     if [ -f "$MAIN_PATH" ]; then
       case "$MAIN_PATH" in
         *.mjs|*.js)
+          echo "--- openclaw: printing first 200 lines of main ---"
+          sed -n '1,200p' "$MAIN_PATH" 2>/dev/null | sed -u 's/^/[openclaw-src] /' || true
+
           echo "--- openclaw: showing --help output ---"
           node --trace-warnings --enable-source-maps "$MAIN_PATH" --help 2>&1 | sed -u 's/^/[openclaw-help] /' || true
           echo "--- openclaw: showing 'gateway --help' output ---"
