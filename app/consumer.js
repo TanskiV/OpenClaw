@@ -7,12 +7,29 @@ const { appendEvent } = require("./appendEvent");
 const queueDir = path.join(__dirname, "..", "queue");
 const tasksFile = path.join(queueDir, "tasks.jsonl");
 const statusFile = path.join(queueDir, "status.json");
+const processedFile = path.join(queueDir, "processed.jsonl");
+const eventsFile = path.join(queueDir, "task_events.jsonl");
 
-function readTasks() {
+function touchFile(file) {
+  fs.mkdirSync(queueDir, { recursive: true });
+  if (!fs.existsSync(file)) {
+    fs.closeSync(fs.openSync(file, "a"));
+  }
+}
+
+function ensureQueueFiles() {
+  fs.mkdirSync(queueDir, { recursive: true });
+  touchFile(eventsFile);
+  touchFile(processedFile);
+  touchFile(tasksFile);
+  touchFile(statusFile);
+}
+
+function readTaskLines() {
   if (!fs.existsSync(tasksFile)) return [];
-  const raw = fs.readFileSync(tasksFile, "utf8").trim();
-  if (!raw) return [];
-  return raw.split("\n").map((l) => JSON.parse(l));
+  const raw = fs.readFileSync(tasksFile, "utf8");
+  if (!raw.trim()) return [];
+  return raw.split("\n").filter((l) => l.trim().length > 0);
 }
 
 function writeStatus(s) {
@@ -34,38 +51,89 @@ async function notifyTelegram(text) {
 }
 
 function consumeOneFIFO() {
-  const tasks = readTasks();
-  if (tasks.length === 0) {
-    console.log("[CONSUMER] no tasks");
+  ensureQueueFiles();
+
+  const lines = readTaskLines();
+  if (lines.length === 0) {
     writeStatus({ state: "idle", ts: new Date().toISOString() });
     return;
   }
 
-  const task = tasks[0]; // FIFO
+  const task = JSON.parse(lines[0]); // FIFO
 
-  const status = {
-    state: "picked",
-    ts: new Date().toISOString(),
-    task: {
-      id: task.id,
-      author: task.author,
-      text: task.text,
-      chatId: task.chatId,
-    },
-  };
+  try {
+    appendEvent({
+      taskId: task.id,
+      event: "picked",
+      by: "consumer",
+      meta: { chatId: task.chatId }
+    });
 
-  writeStatus(status);
-  console.log(`[CONSUME] picked task ${task.id}: ${task.text}`);
+    notifyTelegram(`🟡 Взял задачу #${task.id}`).catch(() => {});
 
-  appendEvent({
-    taskId: task.id,
-    event: "picked",
-    by: "consumer",
-    meta: { chatId: task.chatId }
-  });
+    writeStatus({
+      state: "picked",
+      ts: new Date().toISOString(),
+      task: {
+        id: task.id,
+        author: task.author,
+        text: task.text,
+        chatId: task.chatId,
+      },
+    });
+    console.log(`picked task ${task.id}: ${task.text}`);
 
-  // fire-and-forget notification
-  notifyTelegram(`🟡 Взял задачу #${task.id}`).catch(() => {});
+    appendEvent({
+      taskId: task.id,
+      event: "done",
+      by: "consumer",
+      meta: { chatId: task.chatId }
+    });
+
+    fs.appendFileSync(processedFile, JSON.stringify(task) + "\n", "utf8");
+
+    const remaining = lines.slice(1);
+    fs.writeFileSync(tasksFile, remaining.length > 0 ? remaining.join("\n") + "\n" : "", "utf8");
+
+    writeStatus({
+      state: "done",
+      ts: new Date().toISOString(),
+      task: {
+        id: task.id,
+        author: task.author,
+        text: task.text,
+        chatId: task.chatId,
+      },
+    });
+    console.log(`done task ${task.id}`);
+  } catch (err) {
+    const reason = err?.message || String(err);
+
+    appendEvent({
+      taskId: task.id,
+      event: "error",
+      by: "consumer",
+      meta: { chatId: task.chatId, reason }
+    });
+
+    fs.appendFileSync(processedFile, JSON.stringify(task) + "\n", "utf8");
+
+    const remaining = lines.slice(1);
+    fs.writeFileSync(tasksFile, remaining.length > 0 ? remaining.join("\n") + "\n" : "", "utf8");
+
+    writeStatus({
+      state: "error",
+      ts: new Date().toISOString(),
+      task: {
+        id: task.id,
+        author: task.author,
+        text: task.text,
+        chatId: task.chatId,
+      },
+      error: reason,
+    });
+    console.log(`error task ${task.id}: ${reason}`);
+  }
 }
 
 consumeOneFIFO();
