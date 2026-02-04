@@ -67,8 +67,7 @@ if [ -f "$PKG_JSON" ]; then
 fi
 
 # 3) Try common module entrypoint and common filenames
-COMMONS=("/usr/local/lib/node_modules/openclaw/openclaw.mjs" "/usr/local/lib/node_modules/openclaw/index.js" "/usr/local/lib/node_modules/openclaw/cli.js" "/usr/local/lib/node_modules/openclaw/bin/openclaw")
-for p in "${COMMONS[@]}"; do
+for p in "/usr/local/lib/node_modules/openclaw/openclaw.mjs" "/usr/local/lib/node_modules/openclaw/index.js" "/usr/local/lib/node_modules/openclaw/cli.js" "/usr/local/lib/node_modules/openclaw/bin/openclaw"; do
   if [ -f "$p" ]; then
     case "$p" in
       *.mjs|*.js)
