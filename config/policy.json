@@ -1,0 +1,21 @@
+{
+  "repo": {
+    "url": "https://github.com/TanskiV/tanski-job-agent.git",
+    "branch": "main"
+  },
+  "allowlist": [
+    "frontend/",
+    "backend/",
+    "config/schemas/"
+  ],
+  "denylist": [
+    ".env",
+    ".github/workflows/",
+    "deploy/",
+    "docker-compose.yml",
+    "package.json",
+    "package-lock.json",
+    "yarn.lock",
+    "pnpm-lock.yaml"
+  ]
+}
