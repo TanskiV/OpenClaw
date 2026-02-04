@@ -197,7 +197,7 @@ async function callOpenAI({ system, user }) {
                   action: { type: "string", enum: ["write", "delete"] },
                   content: { type: "string" }
                 },
-                required: ["path", "action"]
+                  required: ["path", "action", "content"]
               }
             }
           },
