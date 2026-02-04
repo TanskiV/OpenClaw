@@ -7,8 +7,12 @@ WORKDIR /app
 # Обязательно: Render прокидывает PORT, используем 10000 по умолчанию
 EXPOSE 10000
 
-# На всякий случай гарантируем, что глобальные бинари в PATH
+# На всякий случай гарантируем, что глобальные бинарари в PATH
 ENV PATH="/usr/local/bin:${PATH}"
 
-# Надёжный запуск через npm exec (не попытается скачивать пакеты благодаря --no-install)
-CMD ["sh", "-c", "exec npm exec --no-install -- openclaw gateway --host 0.0.0.0 --port ${PORT:-10000}"]
+# Копируем скрипт-обёртку и делаем его исполняемым
+COPY ./run-openclaw.sh /usr/local/bin/run-openclaw.sh
+RUN chmod +x /usr/local/bin/run-openclaw.sh
+
+# Надёжный запуск через скрипт-обёртку
+CMD ["/usr/local/bin/run-openclaw.sh"]
