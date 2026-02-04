@@ -235,6 +235,31 @@ function consumeOneFIFO() {
   }
 
   try {
+    if (hasEvent(events, "dry_run_ready")) {
+      if (!dryRunResult) {
+        dryRunResult = runDryRun(task);
+      }
+      if (dryRunResult?.noChanges) {
+        appendEvent({ taskId: task.id, event: "noop", by: "executor", meta: {} });
+        notifyTelegram(`✅ Done #${task.id} (no changes)`, task.chatId).catch(() => {});
+        appendEvent({ taskId: task.id, event: "done", by: "executor", meta: {} });
+
+        archiveTask(task);
+        popHead(lines);
+
+        writeStatus({
+          state: "done",
+          ts: new Date().toISOString(),
+          task: { id: task.id, author: task.author, text: task.text, chatId: task.chatId },
+          result: "noop"
+        });
+        console.log(`done task ${task.id}`);
+
+        cleanupWorkspace(task);
+        return;
+      }
+    }
+
     if (!hasEvent(events, "commit_created")) {
       const commitInfo = createCommit(task);
       appendEvent({

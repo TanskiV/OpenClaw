@@ -70,11 +70,12 @@ function runDryRun(task) {
   const { workspaceDir } = ensureWorkspace(task);
 
   const diffInfo = getDiffInfo(workspaceDir);
+  const noChanges = diffInfo.files.length === 0;
   if (diffInfo.files.length > 0) {
     validatePaths(diffInfo.files, policy);
   }
 
-  const summary = diffInfo.files.length === 0
+  const summary = noChanges
     ? "No changes generated (dry-run stub)"
     : `Changes: ${diffInfo.files.length} files`;
 
@@ -84,6 +85,7 @@ function runDryRun(task) {
     files: diffInfo.files,
     additions: diffInfo.additions,
     deletions: diffInfo.deletions,
+    noChanges
   };
 }
 
