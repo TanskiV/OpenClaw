@@ -10,5 +10,5 @@ EXPOSE 10000
 # На всякий случай гарантируем, что глобальные бинари в PATH
 ENV PATH="/usr/local/bin:${PATH}"
 
-# Надёжный запуск: используем sh -c и exec, без -l (оно может не поддерживаться в sh на платформе)
-CMD ["sh", "-c", "exec openclaw gateway --host 0.0.0.0 --port ${PORT:-10000}"]
+# Надёжный запуск через npm exec (не попытается скачивать пакеты благодаря --no-install)
+CMD ["sh", "-c", "exec npm exec --no-install -- openclaw gateway --host 0.0.0.0 --port ${PORT:-10000}"]
