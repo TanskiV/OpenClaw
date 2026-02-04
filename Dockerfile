@@ -4,8 +4,8 @@ RUN npm install -g openclaw
 
 WORKDIR /app
 
-# На всякий случай, чтобы Render точно видел глобальные бинарники
-ENV PATH="/usr/local/bin:${PATH}"
+# Обязательно: Render прокидывает PORT, используем 10000 по умолчанию
+EXPOSE 10000
 
-# Самый надежный запуск: напрямую через node по реальному пути
-CMD ["node", "/usr/local/lib/node_modules/openclaw/openclaw.mjs"]
+# Используем глобальный бинарник — надёжнее, чем хардкодить путь внутри node_modules
+CMD ["sh", "-lc", "$(npm bin -g)/openclaw gateway --host 0.0.0.0 --port ${PORT:-10000}"]
