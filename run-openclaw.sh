@@ -47,12 +47,39 @@ if [ -f "$PKG_JSON" ]; then
         ;;
     esac
   fi
+
+  # If no bin, try `main` field
+  MAIN_FIELD=$(node -e "try{const p=require('$PKG_JSON'); console.log(p.main||'');}catch(e){console.log('');}")
+  if [ -n "$MAIN_FIELD" ]; then
+    MAIN_FIELD="${MAIN_FIELD#./}"
+    MAIN_PATH="/usr/local/lib/node_modules/openclaw/${MAIN_FIELD}"
+    if [ -f "$MAIN_PATH" ]; then
+      case "$MAIN_PATH" in
+        *.mjs|*.js)
+          exec node "$MAIN_PATH" gateway --host 0.0.0.0 --port "$PORT"
+          ;;
+        *)
+          exec "$MAIN_PATH" gateway --host 0.0.0.0 --port "$PORT"
+          ;;
+      esac
+    fi
+  fi
 fi
 
-# 3) Try common module entrypoint
-if [ -f "/usr/local/lib/node_modules/openclaw/openclaw.mjs" ]; then
-  exec node /usr/local/lib/node_modules/openclaw/openclaw.mjs gateway --host 0.0.0.0 --port "$PORT"
-fi
+# 3) Try common module entrypoint and common filenames
+COMMONS=("/usr/local/lib/node_modules/openclaw/openclaw.mjs" "/usr/local/lib/node_modules/openclaw/index.js" "/usr/local/lib/node_modules/openclaw/cli.js" "/usr/local/lib/node_modules/openclaw/bin/openclaw")
+for p in "${COMMONS[@]}"; do
+  if [ -f "$p" ]; then
+    case "$p" in
+      *.mjs|*.js)
+        exec node "$p" gateway --host 0.0.0.0 --port "$PORT"
+        ;;
+      *)
+        exec "$p" gateway --host 0.0.0.0 --port "$PORT"
+        ;;
+    esac
+  fi
+done
 
 # 4) Fallback to npm exec --no-install
 if command -v npm >/dev/null 2>&1; then
